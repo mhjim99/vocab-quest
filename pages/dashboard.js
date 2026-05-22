@@ -5,13 +5,14 @@ import Head from 'next/head'
 import { supabase } from '../lib/supabase'
 import { sounds } from '../lib/sound'
 import Mascot from '../components/Mascot'
-import { Trophy, Flame, Zap, Plus, LogOut, ChevronRight, Sparkles, BookOpen } from 'lucide-react'
+import { Trophy, Flame, Zap, Plus, LogOut, ChevronRight, BookOpen, Trash2 } from 'lucide-react'
 
 export default function Dashboard() {
   const router = useRouter()
   const [user, setUser] = useState(null)
   const [stats, setStats] = useState({ totalTests: 0, totalPoints: 0, rank: '-', streak: 0 })
   const [batches, setBatches] = useState([])
+  const [deleting, setDeleting] = useState(null)
 
   useEffect(() => {
     const stored = localStorage.getItem('vq_user')
@@ -36,8 +37,24 @@ export default function Dashboard() {
   }
 
   async function loadBatches() {
-    const { data } = await supabase.from('word_batches').select('id, label, created_at').order('created_at', { ascending: false }).limit(5)
+    const { data } = await supabase.from('word_batches').select('id, label, created_at, created_by').order('created_at', { ascending: false }).limit(10)
     if (data) setBatches(data)
+  }
+
+  async function handleDelete(batchId, label, e) {
+    e.preventDefault()
+    e.stopPropagation()
+    if (!confirm(`Delete "${label}"? This removes the batch and all its words. You can't undo this.`)) return
+    sounds.click()
+    setDeleting(batchId)
+    const { error } = await supabase.from('word_batches').delete().eq('id', batchId)
+    if (error) {
+      alert('Could not delete: ' + error.message)
+      setDeleting(null)
+      return
+    }
+    setBatches(prev => prev.filter(b => b.id !== batchId))
+    setDeleting(null)
   }
 
   function logout() { sounds.click(); localStorage.removeItem('vq_user'); router.push('/') }
@@ -63,7 +80,6 @@ export default function Dashboard() {
             <button onClick={logout} style={s.iconBtn}><LogOut size={18} /></button>
           </header>
 
-          {/* XP Bar */}
           <div style={s.xpBox}>
             <div style={s.xpHeader}>
               <span style={s.xpLevel}>Level {Math.floor(stats.totalPoints / 100) + 1}</span>
@@ -74,14 +90,12 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* Stat cards */}
           <div style={s.statGrid}>
             <StatCard icon={<Flame size={22} />} value={stats.streak} label="Day streak" color="#FB923C" bg="rgba(251, 146, 60, 0.12)" />
             <StatCard icon={<Trophy size={22} />} value={stats.rank} label="Rank" color="#FCD34D" bg="rgba(252, 211, 77, 0.12)" />
             <StatCard icon={<Zap size={22} />} value={stats.totalTests} label="Quizzes" color="#A78BFA" bg="rgba(167, 139, 250, 0.12)" />
           </div>
 
-          {/* Main quiz CTA */}
           <Link href="/quiz" style={{textDecoration: 'none'}}>
             <div style={s.heroCard}>
               <div style={s.heroLeft}>
@@ -112,16 +126,32 @@ export default function Dashboard() {
             <div style={s.section}>
               <h3 style={s.sectionTitle}>📚 Recent batches</h3>
               <div style={s.batchList}>
-                {batches.map(b => (
-                  <Link key={b.id} href={`/quiz?batch=${b.id}`} style={s.batchRow}>
-                    <div style={s.batchIcon}><BookOpen size={18} /></div>
-                    <div style={s.batchInfo}>
-                      <p style={s.batchLabel}>{b.label}</p>
-                      <p style={s.batchDate}>{new Date(b.created_at).toLocaleDateString('en', { month: 'short', day: 'numeric' })}</p>
+                {batches.map(b => {
+                  const isOwner = b.created_by === user.id
+                  return (
+                    <div key={b.id} style={s.batchRow}>
+                      <Link href={`/quiz?batch=${b.id}`} style={s.batchMain}>
+                        <div style={s.batchIcon}><BookOpen size={18} /></div>
+                        <div style={s.batchInfo}>
+                          <p style={s.batchLabel}>{b.label}</p>
+                          <p style={s.batchDate}>{new Date(b.created_at).toLocaleDateString('en', { month: 'short', day: 'numeric' })}</p>
+                        </div>
+                      </Link>
+                      {isOwner ? (
+                        <button
+                          style={{...s.deleteBtn, opacity: deleting === b.id ? 0.4 : 1}}
+                          onClick={(e) => handleDelete(b.id, b.label, e)}
+                          disabled={deleting === b.id}
+                          title="Delete this batch"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      ) : (
+                        <ChevronRight size={18} color="var(--text-3)" style={{marginRight: 10}} />
+                      )}
                     </div>
-                    <ChevronRight size={18} color="var(--text-3)" />
-                  </Link>
-                ))}
+                  )
+                })}
               </div>
             </div>
           )}
@@ -168,9 +198,11 @@ const s = {
   section: { marginBottom: '24px' },
   sectionTitle: { fontSize: 14, fontWeight: 800, color: 'var(--text-2)', marginBottom: '12px' },
   batchList: { display: 'flex', flexDirection: 'column', gap: '8px' },
-  batchRow: { display: 'flex', alignItems: 'center', gap: '12px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '14px', padding: '14px 16px', color: 'var(--text)' },
-  batchIcon: { width: 36, height: 36, borderRadius: 10, background: 'var(--purple-bg)', color: 'var(--purple)', display: 'flex', alignItems: 'center', justifyContent: 'center' },
+  batchRow: { display: 'flex', alignItems: 'center', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '14px', overflow: 'hidden' },
+  batchMain: { display: 'flex', alignItems: 'center', gap: '12px', padding: '14px 16px', color: 'var(--text)', flex: 1, textDecoration: 'none' },
+  batchIcon: { width: 36, height: 36, borderRadius: 10, background: 'var(--purple-bg)', color: 'var(--purple)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   batchInfo: { flex: 1 },
   batchLabel: { fontSize: 15, fontWeight: 700, marginBottom: 2 },
   batchDate: { fontSize: 12, color: 'var(--text-3)', fontWeight: 600 },
+  deleteBtn: { width: 38, height: 38, borderRadius: 10, background: 'transparent', border: 'none', color: 'var(--red)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', marginRight: 8, transition: 'background 0.15s' },
 }
